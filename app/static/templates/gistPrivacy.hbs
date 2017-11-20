@@ -1,0 +1,23 @@
+<form id="form" class="ui form" onsubmit="return false">
+	<div class="ui text container" style="margin-bottom:2%">
+		<select id="sel1" class="ui floating fluid search dropdown"></select>
+	</div>
+	<div class="ui text container" style="margin-bottom:2%">
+		<select id="sel2" class="ui floating fluid search dropdown">
+        <option value="public">Public</option>
+        <option value="private">Private</option>
+    </select>
+	</div>
+	<div class="ui text container" style="margin-bottom:2%">
+		<button class="ui primary blue button" id="but1" onclick="gistPrivacy.doit()">Set Privacy</button>
+		<button class="ui primary blue button" id="but1" onclick="gistPrivacy.gistDo()">Preview</button>
+		<hr>
+	</div>
+	<div class="ui text container" style="margin-bottom:2%">
+		<h1 id="gistheading"></h1>
+	</div>
+	<div class="ui text container" style="margin-bottom:2%">
+		<div class="ui segments" id="display">
+		</div>
+	</div>
+</form>

@@ -1,0 +1,35 @@
+<div class="ui fixed inverted menu">
+	<div class="ui container">
+		<a href="#" class="header">
+			<img class="logo" src="/static/styles/images/logo.png">
+		</a>
+		<a onclick="mathsafe.view_home()" class="item"><i class="home icon"></i>Home</a>
+		<div class="ui simple dropdown item">
+			<i class="cube icon"></i>Scratch <i class="dropdown icon"></i>
+			<div class="menu">
+				<a class="item" onclick="index.click_addScratch()">Create</a>
+				<a class="item" onclick="index.click_updated()">Edit</a>
+				<a class="item" onclick="index.click_deleted()">Delete</a>
+			</div>
+		</div>
+		<div class="ui simple dropdown item">
+			<i class="cubes icon"></i>Gists<i class="dropdown icon"></i>
+			<div class="menu">
+				<a class="item" onclick="index.click_addg()">Create</a>
+				<a class="item" onclick="index.click_scratchg()">Edit</a>
+				<a class="item" onclick="index.click_delg()">Delete</a>
+				<a class="item" onclick="index.click_viewg()">View</a>
+				<a class="item" onclick="index.click_gistprivacy()">Set Privacy</a>
+				<a class="item" onclick="index.click_getid()">Get Gist ID</a>
+			</div>
+		</div>
+		<div class="right menu">
+			<div class="item">
+				<a class="ui basic blue button" onclick="index.click_viewbyid()"><i class="file icon"></i>View by ID</a>
+			</div>
+			<div class="item">
+				<a class="ui basic teal button" onclick="index.click_logout()"><i class="sign out icon"></i>Log out</a>
+			</div>
+		</div>
+	</div>
+</div>

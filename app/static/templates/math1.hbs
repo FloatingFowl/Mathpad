@@ -1,0 +1,20 @@
+<form id="form" class="ui form" onsubmit="return false">
+	<div class="ui text container fluid right labeled left input" style=" margin-bottom: 2%;">
+		<input type="text" id="inphead" placeholder="Enter heading">
+		<strong class="ui tag label">Header</strong>
+	</div>
+	<div class=" ui text container" style="margin-bottom:2%">
+		<textarea id="inp" placeholder="Enter body"></textarea>
+	</div>
+	<div class="ui text container">
+		<button class="ui primary button" onclick="mathsafe.math1g()">Save It</button>
+		<button class="ui button" onclick="mathsafe.math1f()">Preview</button>
+		<hr>
+	</div>
+	<div class="ui text container">
+		<div class="ui raised segment">
+			<div class="ui header" id="head"></div>
+			<div id="content"></div>
+		</div>
+	</div>
+</form>

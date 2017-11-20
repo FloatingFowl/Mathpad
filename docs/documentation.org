@@ -1,0 +1,1782 @@
+#+TITLE: GoodReads Documentation
+#+AUTHOR: Projit, Atreyee, Yaseen, Ojaswi
+
+* How to use the application:
+- Installation requirements are given the the requirements file.
+- After installing them =cd= into the directory goodreads server
+- Run the command =python3 run.py=
+- Navigate to =localhost:8080/user/login=
+* Requirements
+#+BEGIN_SRC python
+appdirs==1.4.3
+click==6.7
+Flask==0.12
+Flask-SQLAlchemy==2.2
+itsdangerous==0.24
+Jinja2==2.9.5
+MarkupSafe==1.0
+packaging==16.8
+pyparsing==2.2.0
+six==1.10.0
+SQLAlchemy==1.1.6
+Werkzeug==0.12.1
+Flask-WTF==0.14.2                       
+#+END_SRC
+* Configuration
+#+BEGIN_SRC python
+#statement for enabling the development environment
+DEBUG = True
+
+# Define the application directory
+import os
+BASE_DIR = os.path.abspath(os.path.dirname(__file__))  
+
+# Define the database - we are working with
+# SQLite for this example
+SQLALCHEMY_DATABASE_URI = 'sqlite:///' + os.path.join(BASE_DIR, 'app.db')
+DATABASE_CONNECT_OPTIONS = {}
+
+# Application threads. A common general assumption is
+# using 2 per available processor cores - to handle
+# incoming requests using one and performing background
+# operations using the other.
+THREADS_PER_PAGE = 2
+
+# Enable protection agains *Cross-site Request Forgery (CSRF)*
+CSRF_ENABLED     = True
+
+# Use a secure, unique and absolutely secret key for
+# signing the data. 
+CSRF_SESSION_KEY = "secret"
+
+# Secret key for signing cookies
+SECRET_KEY = "secret"
+#+END_SRC
+* Running
+#+BEGIN_SRC python
+#running test server on local machine
+from app import app
+app.run(host="127.0.0.1", port=8080, debug=True)
+#+END_SRC
+* Validation Checks
+** Imports
+#+BEGIN_SRC python
+import re
+#+END_SRC
+** Valid Username
+#+BEGIN_SRC python
+
+def is_valid_username(username="ciel_adlucem. the third") :
+    
+    """to check if valid username"""
+    if re.fullmatch("^[A-Za-z0-9_-s. ]+$", username) :
+        return True
+    else :
+        return False
+
+
+#+END_SRC
+** Valid Email
+#+BEGIN_SRC python
+def is_valid_email(email) :
+
+    """to check if valid email"""
+    if re.fullmatch( 	"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$", email) :
+        return True
+    else :
+        return False
+#+END_SRC
+** Valid Picture
+#+BEGIN_SRC python
+def is_valid_picture(picture) :
+
+    """to check if the link to the picture generated is valid"""
+    """edit- I'm not sure what our picture link will look like"""
+    return True
+#+END_SRC
+** Valid Book Title
+#+BEGIN_SRC python
+def is_valid_book_title(title) :
+
+    """to check if book title is valid"""
+    if re.fullmatch("^[a-zA-Z0-9\s_]+$", title) :
+        return True
+    else :
+        return False
+#+END_SRC
+** Valid Author
+#+BEGIN_SRC python
+def is_valid_author(author_name) :
+    """To check if author name provided is valid."""
+
+    if re.fullmatch("^[A-Za-z0-9-. ]+$", author_name) :
+        return True
+    else :
+        return False
+#+END_SRC
+** Valid Rating
+#+BEGIN_SRC python
+def is_valid_rating(rating) :
+
+    "to check if rating given is between 1 and 5 stars"
+    if ((rating > '0') and (rating <= '5')) or (rating == '-') :
+        return True
+    else :
+        return False
+#+END_SRC
+* User
+** Models
+*** Imports
+    We imort the required elements to link this with other models
+#+BEGIN_SRC python
+from flask_sqlalchemy import SQLAlchemy
+from app import db
+
+from app.book.models import Book
+from app.review.models import Review
+#+END_SRC
+*** Class
+- table is named user
+- id is the primary key
+- different features of the user are inputted as db columns
+- Foreign key relations have been defined according to db model
+- =__init__= is used to initialize an instance of the class
+- =to_dict= is used to help return objects in javascript format
+
+#+BEGIN_SRC python
+class User(db.Model) :
+
+    """Table to store user object"""
+    
+    __tablename__ = 'user'
+
+    #table fields
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True, nullable=False)  
+    role = db.Column(db.String(5), nullable=False)
+    username = db.Column(db.String(80), unique=True, nullable=False)
+    email = db.Column(db.String(300), unique=True, nullable=False)
+    password = db.Column(db.String(300), nullable=False)
+    picture = db.Column(db.String(300))
+
+    #relationships to other tables
+    books_added = db.relationship('Book', backref='user', lazy='dynamic')
+    reviews_written = db.relationship('Review', backref='user', lazy='dynamic')
+    preferences = db.relationship('Preference', backref='user', lazy='dynamic')
+    books_marked_as = db.relationship('Marking', backref='user', lazy='dynamic')
+
+    #functions
+    def __init__(self, username, email, password) :
+        self.role = 'user'
+        self.username = username
+        self.email = email
+        self.password = password
+        self.picture = '/home/pictures/'
+
+    def to_dict(self):
+        return {
+            'id' : self.id,
+            'username': self.username,
+            'email': self.email,
+            'role': self.role,
+        }
+        
+    def __repr__(self) :
+
+        """to test print an user upon addition"""
+        
+        return "<User id %d : %s>" % (self.id, self.username)
+
+
+#+END_SRC
+** Controllers
+*** Imports
+#+BEGIN_SRC python
+# Import flask dependencies
+from flask import Blueprint, request, render_template, \
+                  flash, g, session, redirect, url_for, jsonify
+from functools import wraps
+
+# Import password / encryption helper tools
+from werkzeug import check_password_hash, generate_password_hash
+
+
+# Import the database object from the main app module
+from app import db
+
+
+#import validation functions
+from app.validation.utils import is_valid_username, is_valid_email, is_valid_picture
+
+
+# Import module models (i.e. User)
+from app.user.models import User
+#+END_SRC
+#+BEGIN_SRC python
+# Define the blueprint: 'auth', set its url prefix: app.url/auth
+mod_user = Blueprint('user', __name__, url_prefix='/user')
+#+END_SRC
+*** Exceptions
+- Exceptions were used to catch mistakes in inputs and protect the db
+#+BEGIN_SRC python
+#user-defined exceptions
+class Error(Exception):
+   """Base class for other exceptions"""
+   pass
+
+class invalidInputError(Error):
+   """Raised when user input is invalid"""
+   pass
+
+class uniqueConstraintViolated(Error):
+   """Raised when the unique constraint on user is violated"""
+   pass
+
+class userNotFound(Error):
+   """Raised when user searched for is not found"""
+   pass
+#+END_SRC
+*** Wrappers
+- These were used to ensure views for different types of users aren't
+  clashing
+#+BEGIN_SRC python
+def requires_auth(f):
+   @wraps(f)
+   def decorated(*args, **kwargs):
+      if 'userID' not in session:
+         return jsonify(success = "False", args = args, kwargs = kwargs)
+      return f(*args, **kwargs)
+   return decorated
+
+def requires_admin_auth(f):
+   @wraps(f)
+   def decorated(*args, **kwargs):
+      if 'userID' not in session or session['role']=='user':
+         return jsonify(success = "False", args = args, kwargs = kwargs)
+      return f(*args, **kwargs)
+   return decorated
+#+END_SRC
+*** Get All Users
+- Was used for testing purposes of the db
+#+BEGIN_SRC python
+#route to get all users
+@mod_user.route('/allUsers')
+def get_all_users():
+    users = User.query.all()
+    return render_template('display_all.html', display = users)    
+#+END_SRC
+*** Add User
+- We receive form inputs and run validation checks on the inputs
+- Successful addition leads to redirectng back to the same page
+#+BEGIN_SRC python
+#route to add an user
+@mod_user.route('/addUser', methods=['POST'])
+def add_user():
+
+    #retrieving user input from form
+    try :
+        username = request.form['username']
+        email = request.form['email']
+        password = request.form['password']
+#        picture = request.form['picture']
+    except KeyError :
+        return jsonify(success=False, error="fields not sent in request")
+
+    #validating input
+    try :
+        valid_username =  is_valid_username(username)
+        valid_email = is_valid_email(email)
+#        valid_picture = is_valid_picture(picture)
+        if not (valid_username and valid_email) :
+            raise invalidInputError
+    except invalidInputError :
+        return jsonify(success=False, error="invalid input")
+
+    #checking if username and email already exists
+    try :
+        if_exists = User.query.filter(User.username == username and User.email == email).count()
+        if if_exists :
+            raise uniqueConstraintViolated
+    except uniqueConstraintViolated :
+        return jsonify(success=False, error="user uniqueness constraint violated")
+
+    #adding new user to table
+    try :
+        obj = User(username, email, password)
+        db.session.add(obj)
+        db.session.commit()
+        
+    except :
+        return jsonify(success=False, error="adding user error")
+
+    else :
+        return redirect('/user/login')
+#+END_SRC
+*** Display Profile
+- We check if the User is logged in
+- If not logged in, we redirect to the login page
+- Renders the profile template
+#+BEGIN_SRC python
+#displays information on User when GET request sent to /user/<id of user>
+@mod_user.route('/profile')
+def user_info():
+   if 'userID' in session:
+      idUser = session['userID']
+      user = User.query.filter_by(id=idUser).first()
+      return render_template('profile_template.html')
+   else:
+      return redirect('/user/login')
+#+END_SRC
+*** Search User
+- This is used to look for details on a particular user
+#+BEGIN_SRC python
+@mod_user.route('/searchUser', methods=['POST'])
+def search_user() :
+
+    #fetching the posted parameter
+    try :
+        search_term = request.form['search_term']
+    except KeyError :
+        return jsonify(success=False, error="fields not sent in request")
+
+    #searching for user by parameter == username
+    try :
+
+        users = User.query.filter(User.username == search_term).all()
+        if not users :
+            raise userNotFound
+
+    except userNotFound :
+        return jsonify(success=False, error="user not found")
+
+    else :
+        return jsonify(success=True), render_template('display_all.html', display = users)
+#+END_SRC
+*** Logging in a User
+- We check the user's details against what is stored in our Database
+- If the details are wrong, they are given a false message
+#+BEGIN_SRC python
+@mod_user.route('/login/', methods=['GET', 'POST'])
+def login():
+   if request.method == 'GET':
+      return render_template('login_template.html')
+   else:
+      try:
+         username = request.form['username']
+         password = request.form['password']
+      except KeyError as e:
+         return jsonify(success=False, message="%s not sent in the request" % e.args), 400
+      
+      user = User.query.filter(User.username == username).first()
+      if user is None or not (user.password == password):
+         return jsonify(success=False, message="Invalid Credentials"), 400
+      session['userID'] = user.id
+      session['role'] = user.role
+      print(session)
+      return redirect('/user/profile')
+#      return redirect('/user/checkLogin')
+#      return jsonify(success=True, user=user.to_dict())
+#+END_SRC
+*** Checking Login
+- This checks the session variable to see whether a user is currently in session or not
+- If it is it returns details of the user, else returns a false
+#+BEGIN_SRC python
+@mod_user.route('/checkLogin', methods=['GET'])
+@requires_auth
+def check_login():
+   if 'userID' in session:
+      user = User.query.filter(User.id == session['userID']).first()
+      return jsonify(success=True, user=user.to_dict())
+   return jsonify(success=False), 401
+#+END_SRC
+*** Logout
+- Clears the session variable
+#+BEGIN_SRC python
+@mod_user.route('/logout', methods=['GET', 'POST'])
+@requires_auth
+def logout():
+   session.pop('userID', None)
+   return redirect('/user/login') #redirect to login page
+#+END_SRC
+*** Easter Egg
+- To be implemented in the future (maybe?)
+#+BEGIN_SRC python
+#easter egg- more like easter kitteh
+@mod_user.route("/kitteh")
+def kitteh() :
+   return jsonify(success="Meow")
+   #will add more easter egg functionality later
+#+END_SRC
+* Marking
+** Models
+*** Imports
+#+BEGIN_SRC python
+from flask_sqlalchemy import SQLAlchemy
+from app import db
+#+END_SRC
+*** Class
+- table is named marking
+- id is the primary key
+- different features of the user are inputted as db columns
+- Foreign key relations have been defined according to db model
+- =__init__= is used to initialize an instance of the class
+- =to_dict= is used to help return objects in javascript format
+#+BEGIN_SRC python
+class Marking(db.Model):
+`    """ storing relations b/w User and Book: Read, Not Read, Want to Read """
+    __tablename__ = 'marking'
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    marking = db.Column(db.String(20), nullable=False)
+    #Foreign Key
+    bookID = db.Column(db.Integer, db.ForeignKey('book.id'), nullable=False)
+    userID = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)    
+    __table__args = (db.UniqueConstraint('userID', 'bookID', name='user_book_marking_uc'))
+
+
+    def __init__(self, userID, bookID, marking):
+        self.userID = userID
+        self.bookID = bookID
+        self.marking = marking
+
+    def __repr__(self) :
+
+        return "<User : %d Marked Book: %d as %s>" % (self.userID, self.bookID, self.marking)
+#+END_SRC 
+** Controllers
+*** Imports
+- importing the required dependencies
+#+BEGIN_SRC python
+# Import flask dependencies
+from flask import Blueprint, request, render_template, \
+   flash, g, session, redirect, url_for, jsonify
+
+
+# Import the database object from the main app module
+from app import db
+
+
+# Import module models (i.e. Marking)
+from app.marking.models import Marking
+from app.book.models import Book
+from app.user.models import User
+#+END_SRC
+#+BEGIN_SRC python
+# Define the blueprint and set its url prefix
+mod_marking = Blueprint('marking', __name__, url_prefix='/marking')
+#+END_SRC
+*** Exceptions
+#+BEGIN_SRC python
+#user-defined exceptions
+class Error(Exception):
+   """Base class for other exceptions"""
+   pass
+
+class invalidInputError(Error):
+   """Raised when user input is invalid"""
+   pass
+
+class MappingsNotFound(Error):
+   """if user or book does not exist in database"""
+   pass
+#+END_SRC
+*** Get All Markings
+- Mainly used for db testing
+#+BEGIN_SRC python
+#route to fetch all book/user/marking tuples
+@mod_marking.route("/allMarkings")
+def get_all_markings():
+    markings = Marking.query.all()
+    return jsonify(success=True), render_template('display_all.html', display = markings)    
+#+END_SRC
+*** Add Marking
+- Creates relatios between user and book and a certain marking
+#+BEGIN_SRC python
+#route to add a Marking to a book/user pair
+@mod_marking.route("/addMarking", methods=["POST"])
+def add_marking():
+
+    #to retrieve form data
+    try :
+        userID = request.form['userID']
+        bookID = request.form['bookID']
+        mark = request.form['mark']
+        
+    except KeyError :
+        return jsonify(success=False, error="fields not sent in request")
+
+
+   #checking if userID and bookID exists
+    try :
+        if_book_exists = Book.query.filter(Book.id == bookID).first()
+        if_user_exists = User.query.filter(User.id == userID).first()
+
+        if not (if_book_exists and if_user_exists) :
+            raise MappingsNotFound
+
+    except MappingsNotFound :
+        return jsonify(success=False, error="book or user does not exist")
+     
+   #if book and user exist
+   #then add or update marking
+    else :
+
+       #if marking already exists, then update marking
+       if Marking.query.filter(Marking.userID == userID and Marking.bookID == bookID).count():
+          update_marking = Marking.query.filter(Marking.userID == userID and Marking.bookID == bookID).first()
+          update_marking.marking = mark
+          db.session.commit
+
+      #else if marking does not exist, add marking
+       else :
+        obj = Marking(userID, bookID, mark)
+        db.session.add(obj)
+        db.session.commit()
+
+       return jsonify(success=True)
+#+END_SRC
+*** Get Markings for a User
+- Filters Db to get all the User-Marking relations
+- Used mainly for testing
+#+BEGIN_SRC python
+#route to fetch all marked books for an user
+@mod_marking.route("/user/<userid>/")
+def user_markings(userid):
+    books = Book.query.filter(Book.id == Marking.query.filter(Marking.userID == userid).first().bookID).all()
+    return  render_template('display_all.html', display=books)
+   # return books
+#+END_SRC
+* Preference
+** Models
+*** Imports
+- Importing dependencies
+#+BEGIN_SRC python
+from flask_sqlalchemy import SQLAlchemy
+from app import db
+#+END_SRC
+*** Class
+- Constructing the Data Base based on the relational db model
+#+BEGIN_SRC python
+class Preference(db.Model):
+    """ storing relations b/w User and Tag: whether the User a positive or negative reaction towards a tag"""
+    __tablename__ = 'preference'
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    reaction = db.Column(db.String(30), nullable=False)
+
+    tag_name = db.Column(db.String(30), nullable=False)
+    ##### VALIDATE TO MAKE SURE TAG EXISTS SOMEWEHRE IN THE TAGS TABLE #####
+    
+    userID = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    __table__args = (db.UniqueConstraint('tag_name', 'userID', name='user_tag_reaction_uc'))
+
+
+    def __init__(self, userID, tag_name, reaction):
+        self.tag_name = tag_name
+        self.userID = userID
+        self.reaction = reaction
+
+    def __repr__(self) :
+
+        return "<User: %d rates Tag: %s as %s>" % (self.userID, self.tag_name, self.reaction)
+#+END_SRC
+** Controllers
+*** Imports
+- Importing Dependencies
+#+BEGIN_SRC python
+# Import flask dependencies
+from flask import Blueprint, request, render_template, \
+                  flash, g, session, redirect, url_for
+
+# Import the database object from the main app module
+from app import db
+
+# Import module models (i.e. User)
+from app.preference.models import Preference
+#+END_SRC
+#+BEGIN_SRC python
+# Define the blueprint: 'auth', set its url prefix: app.url/auth
+mod_preference = Blueprint('preference', __name__, url_prefix='/preference')
+#+END_SRC
+*** Get All Preferences
+- Used for mainly testing purposes, queries the whole database
+#+BEGIN_SRC python
+@mod_preference.route('/allPreferences/')
+def get_all_preferences():
+    preferences = Preference.query.all()
+    return render_template("display_all.html", display = preferences)
+#+END_SRC
+*** Get User Reviews
+- Filters the db based on User for User-Preference relations
+#+BEGIN_SRC python
+@mod_preference.route('/user/<userid>/')
+def get_user_reviews(userid):
+    preferences = Preference.query.filter_by(userID=userid).all()
+    return render_template('display_all.html', display=preferences)
+#+END_SRC
+*** Tag Preferences
+- Testing purposes, gets preferences by tag name
+#+BEGIN_SRC python
+@mod_preference.route('/tag/<tagname>/')
+def get_tag_preferences(tagname):
+    preferences = Preference.query.filter_by(tag_name=tagname).all()
+    return render_template('display_all.html', display=preferences)
+#+END_SRC
+*** Add Preference
+- Adds a preference object to the db, after checking the input
+#+BEGIN_SRC python
+@mod_preference.route('/addPreference/', methods=['POST'])
+def add_preference():
+    tagname = request.form['tag_name']
+    userId = request.form['userID']
+    reaction = request.form['reaction']
+    flag = 0
+    ifpexists = Preference.query.filter(Preference.userID == userId and Preference.tag_name == tagname).first()
+    if Preference.query.filter(Preference.userID == userId and Preference.bookID == bookId).count():
+        flag=1
+    if flag==0 :
+        obj = Preference(userId, tagname, reaction)
+        db.session.add(obj)
+        db.session.commit()
+#+END_SRC
+* Review
+** Models
+*** Imports
+- Importing dependencies
+#+BEGIN_SRC python
+from flask_sqlalchemy import SQLAlchemy
+from app import db
+#+END_SRC
+*** Class
+- Formed the database based on the relational model
+#+BEGIN_SRC python
+class Review(db.Model) :
+
+    """Table to store Review/Rating object"""
+
+    __tablename__ = 'review'
+
+    #table fields
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True, nullable=False)
+    rating = db.Column(db.String(2), nullable=False)
+    review = db.Column(db.String(1000))
+
+    #foreign key to user who reviewed/rated
+    userID = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+
+    #foreign key to book the review/rating is for
+    bookID = db.Column(db.Integer, db.ForeignKey('book.id'), nullable=False)
+    
+
+    #functions
+    def __init__(self, rating, review, userID, bookID) :
+        self.rating = rating
+        self.review = review
+        self.userID = userID
+        self.bookID =bookID
+
+    def to_dict(self):
+        return {
+            'id' : self.id,
+            'rating': self.rating,
+            'review': self.review,
+            'bookID': self.bookID,
+            'userID': self.userID
+        }
+
+    def __repr__(self) :
+
+        """test print function"""
+        
+        return "<Rating given: %s, Review: %s on book %s>" % (self.rating, self.review, self.bookID)
+#+END_SRC
+** Controllers
+*** Imports
+#+BEGIN_SRC python
+# Import flask dependencies
+from flask import Blueprint, request, render_template, \
+                  flash, g, session, redirect, url_for, jsonify
+
+
+# Import the database object from the main app module
+from app import db
+from app.validation.utils import is_valid_rating
+
+# Import module models (i.e. Review)
+from app.review.models import Review
+from app.book.models import Book
+from app.user.models import User
+#+END_SRC
+#+BEGIN_SRC python
+# Define the blueprint: 'auth', set its url prefix: app.url/auth
+mod_review = Blueprint('review', __name__, url_prefix='/review')
+#+END_SRC
+*** Exceptions
+#+BEGIN_SRC python
+#define user defined exceptions
+class Error(Exception):
+   """Base class for other exceptions"""
+   pass
+
+class invalidInputError(Error) :
+    """user input is invalid"""
+    pass
+
+class reviewMappingsNotFound(Error) :
+   """user/book ID given does not exist in table"""
+   pass
+
+class UniqueConstraintViolated(Error) :
+   """rating/review pair already exists for that user/book combination"""
+   pass
+
+
+#define routes and controllers here
+#+END_SRC
+*** Get All Reviews
+- Mainly for testing purposes, returns all the reviews present in the table
+#+BEGIN_SRC python
+#route to fetch all ratings/reviews
+@mod_review.route('/allReviews')
+def get_all_reviews():
+    reviews = Review.query.all()
+    return jsonify(success=True), render_template("display_all.html", display = reviews)
+#+END_SRC
+*** Add Review
+- Takes Form Inputs
+- Only Adds a review, not the rating
+- Runs Validation Checks
+
+#+BEGIN_SRC python
+#route to add a review to a book
+@mod_review.route('/addReview', methods=['POST'])
+def add_review():
+
+    #retrieving user input from input form
+    try :
+        userID = session['userID']
+        bookID = request.form['bookID']
+        rating = "0"
+        review = request.form['review']
+    except KeyError :
+        return jsonify(success=False, error="fields not sent in request")
+
+    #checking if bookID and userID exists
+    try :
+        if_book_exists = Book.query.filter(Book.id == bookID).first()
+        if_user_exists = User.query.filter(User.id == userID).first()
+
+        if not (if_book_exists and if_user_exists) :
+            raise reviewMappingsNotFound
+
+    except reviewMappingsNotFound :
+        return jsonify(success=False, error="book or user does not exist")
+
+    #adding a review/rating
+    try :
+      if_exists = Review.query.filter(Review.userID == userID).filter(Review.bookID == bookID)
+      
+      if if_exists.count() :
+          if (if_exists.first().review == "-"):
+             if_exists.first().review = review
+             db.session.commit()
+          elif (if_exists.first().rating == "0"):
+             if_exists.first().rating = rating
+             db.session.commit()
+          else:
+             raise UniqueConstraintViolated
+            
+      elif not if_exists.count() :
+         obj = Review(rating, review, userID, bookID)
+         db.session.add(obj)
+         db.session.commit()
+         
+    except UniqueConstraintViolated :
+       return jsonify(success=False, error="cannot add more than one rating/review per user")
+
+    else :
+       return jsonify(success=True)
+#+END_SRC
+*** Add Rating
+- Adds a Rating, not review
+- Does Validation Checks
+#+BEGIN_SRC python
+#route to add a rating to a book
+@mod_review.route('/addRating', methods=['POST'])
+def add_rating():
+
+    #retrieving user input from input form
+    try :
+        userID = session['userID']
+        bookID = request.form['bookID']
+        rating = request.form['rating']
+        review = "-"
+    except KeyError :
+        return jsonify(success=False, error="fields not sent in request")
+
+     
+    #checking if bookID and userID exists
+    try :
+        if_book_exists = Book.query.filter(Book.id == bookID).first()
+        if_user_exists = User.query.filter(User.id == userID).first()
+
+        if not (if_book_exists and if_user_exists) :
+            raise reviewMappingsNotFound
+
+    except reviewMappingsNotFound :
+        return jsonify(success=False, error="book or user does not exist")
+
+     
+    #adding a review/rating
+    try :
+      if_exists = Review.query.filter(Review.userID == userID).filter(Review.bookID == bookID)
+      
+      if if_exists.count() :
+          if (if_exists.first().review == "-"):
+             if_exists.first().review = review
+             db.session.commit()
+          elif (if_exists.first().rating == "-"):
+             if_exists.first().rating = rating
+             db.session.commit()
+          else:
+             pass
+             #raise UniqueConstraintViolated
+             
+      elif not if_exists.count() :
+         obj = Review(rating, review, userID, bookID)
+         db.session.add(obj)
+         db.session.commit()
+         
+    except UniqueConstraintViolated :
+       return jsonify(success=False, error="cannot add more than one rating/review per user")
+
+    else :
+       return jsonify(success=True)
+
+#still need to add success messages how to use: can either insert
+#rating&review, rating and review='-' or rating='-' and review; if one
+#of them is '-', it will go back and edit that if another update is
+#made.
+#+END_SRC
+*** Books User has read
+- If a User has rated a book it is assumed that the user has read it
+- We query the database for all the user-book pairs
+#+BEGIN_SRC python
+@mod_review.route('/myreadbooks')
+def get_user_read_books():
+   if 'userID' in session:
+      userid = session['userID']
+      reviews = Review.query.filter_by(userID=userid).all()
+      arr = []
+      for i in reviews:
+         arr.append(i.to_dict()["bookID"])
+      return jsonify(arr2 = arr)
+      books = Book.query.filter(Book.id in arr)
+      arr2 = []
+      for i in books:
+         arr2.append(i.to_dict())
+      return jsonify(bookslist = arr2)
+#+END_SRC
+*** Average Rating Given By A User
+- This is a feature only available to logged in user
+- It queries the table for all the user-review pairs
+- it then calculates an average of all the ratings given by it
+#+BEGIN_SRC python
+#route to fetch all ratings/reviews added by an user
+@mod_review.route('/user/avg_rating')
+def get_user_reviews():
+   if 'userID' in session:
+      userid = session['userID']
+      reviews = Review.query.filter_by(userID=userid).all()
+      arr = []
+      for i in reviews:
+         arr.append(i.to_dict())
+      number = len(arr)
+      if len(arr)==0:
+         number = 1
+      total = 0
+      for review in arr:
+         total = total + int(review["rating"])
+      avg = total / number
+      return jsonify(avg_rating = avg)
+   else:
+      return redirect('/user/login')
+#+END_SRC
+*** Gets All Ratings/Reviews for a Book
+#+BEGIN_SRC python
+#route to fetch all ratings/reviews for a particular book
+@mod_review.route('/book/<bookid>')
+def get_book_reviews(bookid):
+    reviews = Review.query.filter_by(bookID=bookid).all()
+    return jsonify(success=True), render_template('display_all.html', display=reviews)
+#+END_SRC
+* Author
+** Models
+*** Imports
+- Importing dependencies
+#+BEGIN_SRC python
+from flask_sqlalchemy import SQLAlchemy
+from app import db
+#+END_SRC
+*** Class
+- Class object created based on  the relational db model
+#+BEGIN_SRC python
+class Author(db.Model) :
+
+    """Table to store Author object"""
+
+    #table fields
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    author = db.Column(db.String(300), nullable=False)
+    bookID = db.Column(db.String(300), db.ForeignKey('book.id'), nullable=False)
+    __table__args = (db.UniqueConstraint('author', 'bookID', name='book_author_uc'))
+
+    
+    #functions
+    def __init__(self, author, bookID) :
+        self.bookID = bookID
+        self.author = author
+        
+    def to_dict(self):
+        return {
+            'id' : self.id,
+            'author': self.author,
+            'bookID': self.bookID
+        }    
+
+        
+    def __repr__(self) :
+
+        return "<Book %s written by author %s>" % (self.bookID, self.author)
+#+END_SRC
+** Controllers
+*** Imports
+#+BEGIN_SRC python
+from flask import Blueprint, request, render_template, \
+    flash, g, session, redirect, url_for, jsonify
+
+# Import the database object from the main app module
+from app import db
+
+# Import module models (i.e. User)
+from app.author.models import Author
+from app.book.models import Book
+#+END_SRC
+#+BEGIN_SRC python
+# Define the blueprint: 'auth', set its url prefix: app.url/auth
+mod_author = Blueprint('author', __name__, url_prefix='/author')
+#+END_SRC
+*** Get All Authors
+- Displays all the Authors in the db
+#+BEGIN_SRC python
+@mod_author.route('/allAuthors')
+def get_all_authors():
+    author = Author.query.all()
+    return render_template("display_all.html", display = author)
+#+END_SRC
+*** Displays Author based on book id
+#+BEGIN_SRC python
+@mod_author.route('/book/<bookid>')
+def get_authors_of_book(bookid):
+    authors = Author.query.filter_by(bookID=bookid).all()
+    return render_template('display_all.html', display=authors)
+#+END_SRC
+*** Search by Substring of Author
+- We take the search term and look whether the author's name has the same substring or not
+- then return a jsonified list of authors
+#+BEGIN_SRC python
+@mod_author.route('/searchBy', methods=['POST'])
+def search_by() :
+   search_term = request.form['search_term']
+   authors = Author.query.filter(Author.author.contains(search_term))
+   arr = []
+   for i in authors:
+      arr.append(i.to_dict()['bookID'])
+   k = list(set(arr))
+   idlist = sorted(k, key=int)
+   books = Book.query.filter(Book.id.in_(idlist)).all()
+#   [next(s for s in books if s.id == id) for id in idlist]
+   arr2 = []
+   for i in books:
+      arr2.append(i.to_dict())
+   return jsonify(books = arr2)
+#+END_SRC
+* Tag
+** Models
+*** Imports
+- Importing dependencies
+#+BEGIN_SRC python
+from flask_sqlalchemy import SQLAlchemy
+from app import db
+#+END_SRC
+*** Class
+- Tag class built based on relational db model
+#+BEGIN_SRC 
+class Tag(db.Model):
+    """ storing relations b/w tag name and Book id"""
+    __tablename__ = 'tag'
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    tag_name = db.Column(db.String(30), nullable=False)
+    #Foreign Key
+    bookID = db.Column(db.Integer, db.ForeignKey('book.id'), nullable=False)
+    __table__args = (db.UniqueConstraint('tag_name', 'bookID', name='tag_book_uc'))
+
+
+    def __init__(self, tag_name, bookID):
+        self.tag_name = tag_name
+        self.bookID = bookID
+
+    def to_dict(self):
+        return {
+            'id' : self.id,
+            'tag_name': self.tag_name,
+            'bookID': self.bookID
+        }    
+        
+    def __repr__(self) :
+
+        return "<Tag : %s Associated with Book: %s>" % (self.tag_name, self.bookID)
+#+END_SRC
+** Controllers
+*** Imports
+#+BEGIN_SRC python
+# Import flask dependencies
+from flask import Blueprint, request, render_template, \
+                  flash, g, session, redirect, url_for, jsonify
+
+
+# Import the database object from the main app module
+from app import db
+
+
+# Import module models (i.e. Tag)
+from app.tag.models import Tag
+from app.book.models import Book
+#+END_SRC
+#+BEGIN_SRC python
+# defining blueprint and setting its URL prefix
+mod_tag = Blueprint('tag', __name__, url_prefix='/tag')
+#+END_SRC
+*** Exceptions
+#+BEGIN_SRC python
+#define user defined exceptions
+class Error(Exception):
+   """Base class for other exceptions"""
+   pass
+
+class MappingsNotFound(Error) :
+   """book ID given does not exist in table"""
+   pass
+
+class AlreadyTaggedAs(Error) :
+    """book-tag pair already exists in table"""
+    pass
+#+END_SRC
+*** Get All Tags
+- Used for testing, queries db for all the tags
+#+BEGIN_SRC python
+#route to fetch all tags
+@mod_tag.route('/allTags')
+def get_all_tags():
+    tags = Tag.query.all()
+    return jsonify(success=True), render_template("display_all.html", display = tags)
+#+END_SRC
+*** Tags Corresponding to a Book
+- Queries db to find all tag-book relations
+#+BEGIN_SRC python
+#route to fetch all tags corresponding to a book
+@mod_tag.route('/book/<bookid>')
+def get_book_tags(bookid):
+    tags = Tag.query.filter_by(bookID=bookid).all()
+    return jsonify(success=True), render_template('display_all.html', display=tags)
+#+END_SRC
+*** Books with a Certain Tag Linking function
+- Used to render a template
+#+BEGIN_SRC python
+@mod_tag.route('/<tagname>')
+def get_books_with_tag(tagname):
+    return render_template('list_template2.html')
+#+END_SRC
+*** Adding a Tag
+- Takes form inputs and allows tag-book pairs to be created in the
+  database
+#+BEGIN_SRC python
+#to add a tag to a book
+@mod_tag.route('/addTag', methods=['POST'])
+def add_tag_relation():
+
+    #to fetch data from form
+    try :
+        tagname = request.form['tag_name']
+        bookID = request.form['bookID']
+    except KeyError :
+        return jsonify(success=False, error="fields not sent in request")
+
+    #checking if bookID exists in database
+    try :
+        if_book_exists = Book.query.filter(Book.id == bookID).first()
+        
+        if not if_book_exists :
+            raise MappingsNotFound
+
+    except MappingsNotFound :
+        return jsonify(success=False, error="book does not exist")
+
+    #if bookID exists and is not already tagged as <tagname>
+    try:
+        if Tag.query.filter(Tag.tag_name == tagname and Tag.bookID == bookID).count() :
+            raise AlreadyTaggedAs
+
+    except AlreadyTaggedAs :
+        return jsonify(success=False, error="book-tag pair already exists")
+
+    #else add tag-book combination to table
+    else :
+        obj = Tag(tagname, bookID)
+        db.session.add(obj)
+        db.session.commit()
+
+        return jsonify(success=True)
+#+END_SRC
+*** Search by Tag / if Search query is substring of the tag
+- Queries db to check if the form input is a substring a tag, then
+  returns the associated books
+#+BEGIN_SRC python
+@mod_tag.route('/searchBy', methods=['POST'])
+def search_by() :
+   search_term = request.form['search_term']
+   tags = Tag.query.filter(Tag.tag_name.contains(search_term))
+   arr = []
+   for i in tags:
+      arr.append(i.to_dict()['bookID'])
+   k = list(set(arr))
+   idlist = sorted(k, key=int)
+   books = Book.query.filter(Book.id.in_(idlist)).all()
+#   [next(s for s in books if s.id == id) for id in idlist]
+   arr2 = []
+   for i in books:
+      arr2.append(i.to_dict())
+   return jsonify(books = arr2)
+#+END_SRC
+* Book
+** Models
+*** Imports
+#+BEGIN_SRC python
+from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import ForeignKey
+from app import db
+#+END_SRC
+*** Class
+- Constructed Object Book based on relational db model
+#+BEGIN_SRC python
+class Book(db.Model) :
+
+    """Table to store Book object"""
+
+    __tablename__ = 'book'
+
+    #table fields
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)  #not sure if this line works
+    title = db.Column(db.String(300), nullable=False)
+    picture = db.Column(db.String(300))
+    desc = db.Column(db.String(1000))
+    avg_rating = db.Column(db.Float)
+    
+
+    #foreign key- links to user that added it
+    userID = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    
+    #relationships to other tables
+    book_reviews = db.relationship('Review', backref='book', lazy='dynamic')
+    book_tags = db.relationship('Tag', backref='book', lazy='dynamic')
+    authors = db.relationship('Author', backref='book', lazy='dynamic')
+    marked_as = db.relationship('Marking', backref='book', lazy='dynamic')
+
+    #functions
+    def __init__(self, title, picture, desc, avg_rating, userID) :
+        self.title = title
+        self.picture = picture
+        self.desc = desc
+        self.avg_rating = avg_rating
+        self.userID = userID
+
+    def to_dict(self):
+        return {
+            'id' : self.id,
+            'title': self.title,
+            'desc': self.desc,
+            'avg_rating': self.avg_rating,
+            'userID': self.userID
+        }    
+        
+    def __repr__(self) :
+
+        return "<Book: %s added by user: %d, bookid: %d>" % (self.title, self.userID, self.id)
+
+
+'''
+what we will do when we add a book:
+create a book and temp store the id.
+check if book-author combination exists in db.
+if exists go back and delete this book based on id.
+if it doesnt, then create the book-author pair.
+'''
+#+END_SRC
+** Controllers
+*** Imports
+#+BEGIN_SRC python
+# Import flask dependencies
+from flask import Blueprint, request, render_template, \
+   flash, g, session, redirect, url_for, jsonify
+from functools import wraps
+
+# Import the database object from the main app module
+from app import db
+from app.review.models import Review
+
+#temporary import for parsing GET request URL
+from urllib.parse import urlparse
+
+
+#importing validation functions
+from app.validation.utils import is_valid_book_title, is_valid_author, is_valid_picture
+
+
+# Import module models (i.e. Book)
+from app.book.models import Book
+from app.author.models import Author
+from app.marking.models import Marking
+from app.review.models import Review
+from app.tag.models import Tag
+#+END_SRC
+#+BEGIN_SRC python
+# Define the blueprint and set url prefix
+mod_book = Blueprint('book', __name__, url_prefix='/book')
+#+END_SRC
+*** Exceptions
+#+BEGIN_SRC python
+#user-defined exceptions
+class Error(Exception):
+   """Base class for other exceptions"""
+   pass
+
+class invalidInputError(Error):
+   """Raised when user input is invalid"""
+   pass
+
+class uniqueConstraintViolated(Error):
+   """Raised when the unique constraint on book is violated"""
+   pass
+
+class bookNotFound(Error):
+   """Raised when book searched for is not found"""
+   pass
+#+END_SRC
+*** Wrappers
+#+BEGIN_SRC 
+def requires_auth(f):
+   @wraps(f)
+   def decorated(*args, **kwargs):
+      if 'userID' not in session:
+         return jsonify(success = "False", args = args, kwargs = kwargs)
+      return f(*args, **kwargs)
+   return decorated
+
+def requires_admin_auth(f):
+   @wraps(f)
+   def decorated(*args, **kwargs):
+      if 'userID' not in session or session['role']=='normal':
+         return jsonify(success = "False", args = args, kwargs = kwargs)
+      return f(*args, **kwargs)
+   return decorated
+#+END_SRC
+*** Get All Books
+- Used for testing, queries db for all books
+#+BEGIN_SRC python
+#function to get all books
+@mod_book.route('/allBooks')
+def get_all_books():
+   books = Book.query.all()
+   return render_template('display_all.html', display = books)
+#+END_SRC
+*** Add Book
+- Takes Form Inputs and Validates them
+#+BEGIN_SRC python
+#function to add a book
+@mod_book.route('/addBook', methods=['POST'])
+def add_book() :
+
+    
+    #retrieving user input from form
+    try:
+       book_title = request.form['title']
+       author = request.form['author']
+       picture = request.form['picture']
+       desc = request.form['desc']
+       avg_rating = request.form['avg_rating']
+       userID = request.form['userID']
+    except KeyError :
+        return jsonify(success=False, error="fields not sent in request")
+     
+    
+    #validating input
+    try :
+       valid_title = is_valid_book_title(book_title)
+       valid_author = is_valid_author(author)
+       valid_picture = is_valid_picture(picture)
+       if not (valid_title and valid_author and valid_picture) :
+          raise invalidInputError
+    except invalidInputError:
+        return jsonify(success=False, error="invalid input")
+     
+
+    #checking if book exists
+    try :
+       if_exists = Book.query.filter(Book.title == book_title).first()
+       if if_exists.title == book_title :
+          author_exists = Author.query.filter(Author.author == author and Author.bookID == if_exists.bookID).first()
+          print("Author print", author_exists.author)
+          if author_exists.author == author :
+             raise uniqueConstraintViolated
+    except uniqueConstraintViolated :
+        return jsonify(success=False, error="book uniqueness constraint violated")
+    except AttributeError :
+       """errror that happens when book title exists
+          with different author"""
+       pass
+    
+    #adding book to book table
+    try :
+       new_book = Book(book_title, picture, desc, avg_rating, userID)
+       db.session.add(new_book)
+       db.session.commit()
+
+       #adding author to author table
+       book_added = Book.query.filter_by(title=book_title).first()
+        
+       new_author = Author(author, book_added.id)
+       db.session.add(new_author)
+       db.session.commit()
+
+    except :
+
+        return jsonify(success=False, error="adding book error")
+
+    else :
+        return jsonify(success=True)
+#+END_SRC
+*** Deleting a Book
+- Deletes a book based on input book id.
+- Removes its traces from all other databases as well
+#+BEGIN_SRC python
+#function to delete a book
+@mod_book.route('/deleteBook', methods=['POST'])
+def delete_book() :
+   bookId = request.form['bookID']
+   print("Book ID to be deleted is: "+bookId)
+   Book.query.filter(Book.id == bookId).delete()
+   Review.query.filter(Review.bookID == bookId).delete()
+   Tag.query.filter(Tag.bookID == bookId).delete()
+   Author.query.filter(Author.bookID == bookId).delete()
+   Marking.query.filter(Marking.bookID == bookId).delete()
+   db.session.commit()
+   return redirect('/user/profile')
+#+END_SRC
+*** Search By substring
+- Allows to query books for substring of title
+#+BEGIN_SRC python
+#function to search for a book by part of its title
+@mod_book.route('/searchBy', methods=['POST'])
+def search_by() :
+   search_term = request.form['search_term']
+   books = Book.query.filter(Book.title.contains(search_term))
+   arr = []
+   for i in books:
+      arr.append(i.to_dict())
+   # plz sort this array according to rating.
+   return jsonify(books = arr)
+#+END_SRC
+*** Search, helper funciton to render a template
+#+BEGIN_SRC python
+@mod_book.route('/search')
+def search() :
+#   search_term = request.form['query']
+   return render_template('list_template1.html')
+#+END_SRC
+*** Recommendation Helper
+#+BEGIN_SRC python
+@mod_book.route('/myrecommendation')
+def myrecommendations():
+   if 'userID' in session:
+      return render_template('recommendation.html')
+   else:
+      return redirect('/user/login')
+#+END_SRC
+*** Recommendation Algorithm + Main Route
+- Recommendations only given to logged in users
+- Queries logged in User's Review data, to look for 4,5 rated books
+- Looks for other Users who have also rated the same book 4,5
+- Goes through their highest rated books
+- Returns those books
+#+BEGIN_SRC python
+@mod_book.route('/recommendation', methods=['POST'])
+def recommend():
+   if 'userID' in session:
+      userid = session['userID']
+      reviews = Review.query.filter_by(userID=userid).all()
+      for i in reviews:
+         if int(i.rating) < 4:
+            reviews.pop(i)
+      reviewList = sorted(reviews, key=lambda x: int(x.rating), reverse=True)
+      k = 0
+      arr = []
+      for i in reviewList:
+         if k==5:
+            break
+         else:
+            arr.append(i.to_dict()['bookID'])
+            k+=1
+      list2 = Review.query.filter(Review.bookID.in_(arr)).all()
+      arr2 = []
+      for i in list2:
+         arr2.append(i.to_dict()['userID'])
+      list3 = Review.query.filter(Review.userID.in_(arr2)).all()
+      for i in list3:
+         if int(i.rating) < 4:
+            reviews.pop(i)
+      finalReviewList = sorted(reviews, key=lambda x: int(x.rating), reverse=True)
+      arr3 = []
+      for i in finalReviewList:
+         arr3.append(i.to_dict()['bookID'])
+      l=list(set(arr3))
+      books = Book.query.filter(Book.id.in_(l)).all()
+      arrFinal = []
+      for i in books:
+         arrFinal.append(i.to_dict())
+      return jsonify(books = arrFinal)
+   else:
+      return redirect('/user/login')   
+#+END_SRC
+*** Information on Particular Book
+- Queries db and also render's a template using jinja
+- Used to display a book and it's properties
+#+BEGIN_SRC python
+@mod_book.route("/<bookid>")
+def info_bookid(bookid):
+   book = Book.query.filter_by(id = bookid).first()
+   authors = Author.query.filter_by(bookID = bookid).all()
+   temp = ""
+   for i in authors:
+      temp=temp+i.to_dict()['author']+","
+   temp=temp[:-1];
+   reviews = Review.query.filter_by(bookID = bookid).all()
+   temp2 = []
+   for i in reviews:
+      temp2.append(i)
+   
+   return render_template('book_display.html', bookID=bookid, title=book.title, authors=temp, description=book.desc, reviews=temp2, rating=book.avg_rating)
+#+END_SRC
+* JS includes
+** Book Information
+- The first ajax call checks whether a user is logged in or not.
+- it hides certain things based on that, logged-in only priveleges
+- It also loads a delete book form for logged in users 
+#+BEGIN_SRC javascript
+var t= function(){
+    $.ajax({
+	url: '/user/checkLogin',
+	method: 'GET',
+	success: function(response){
+	    if (response["success"] === false)
+	    {
+		$(".hideifnotlogged").html("");
+	    }
+	    else{
+		temp1 = window.location.pathname.split("/");
+		temp_search = temp1[temp1.length-1];
+		temp="<form action='/book/deleteBook' method='post'><input type='checkbox' name='bookID' value='"+temp_search+"'/><input type='submit' value='DELETE THIS BOOK'/></form>"
+		var $div = $("#insertHere2");
+		$div.html(temp);
+	    }
+	},
+
+	error: function(response){
+	    console.log(response);
+	}
+    });
+
+}
+
+t()
+#+END_SRC
+** Dislplaying Search Results
+- Searchs the Url for the search parameters
+- Creates a query, then ajax calls to the searchBy functions in the controllers
+- Concatanates the results using async and a common list.
+- Then dynamically displays the books queried
+#+BEGIN_SRC javascript
+var f = function(){
+    function getParameter(paramName) {
+	var searchString = window.location.search.substring(1),
+	    i, val, params = searchString.split("&");
+
+	for (i=0;i<params.length;i++) {
+	    val = params[i].split("=");
+	    if (val[0] == paramName) {
+		return val[1];
+	    }
+	}
+	return null;
+    }
+    arr= []
+    search_string = getParameter("query");
+    search = search_string.replace(/\+/g, " ");
+    $.ajax({
+	url : '/book/searchBy',
+	method: 'POST',
+	data : {search_term : search},
+	async : false,
+	success: function(response){
+	    arr = arr.concat(response['books']) 
+	},
+	error: function(response){
+	    console.log(response);
+	}
+    });
+    $.ajax({
+	url : '/author/searchBy',
+	method: 'POST',
+	data : {search_term : search},
+	async : false,
+	success: function(response){
+	    arr = arr.concat(response['books'])
+	},
+	error: function(response){
+	    console.log(response);
+	}
+    });
+    $.ajax({
+	url : '/tag/searchBy',
+	method: 'POST',
+	data : {search_term : search},
+	async : false,
+	success: function(response){
+	    arr=arr.concat(response['books'])
+	},
+	error: function(response){
+	    console.log(response);
+	}
+    });
+    /*    $("#first_book").html(arr[0].title)
+	  alert(arr)
+	  title="#t"
+	  for(var i=0; i<7; i++)
+	  {
+	  $(title.concat(i+1)).html(arr[i].title)
+	  }*/
+    var $div = $("#insertHere");
+    var temp = "";
+    for (var i=0; i<arr.length; i++)
+    {
+	if(i%6 ===0 & i!==0) temp = temp+"</div>";
+	if(i%6 === 0) temp = temp +"<div class='row stylish-panel'>";
+	temp = temp +"<div class='col-md-2'><div><img src='http://lorempixel.com/200/200/abstract/1/' alt='Book name' class='img-rectangle img-thumbnail'><h2>"+ arr[i].title+"</h2><p>"+arr[i].desc+"</p><a href='/book/"+arr[i].id+"' class='btn btn-primary' title='See more'>See more </a></div></div>";
+    }
+    $div.html(temp);
+}
+
+
+var t= function(){
+    $.ajax({
+	url: 'checkLogin',
+	method: 'GET',
+	success: function(response){
+	    if (response["success"] === false)
+	    {
+		$(".hideifnotlogged").html("")
+	    }
+	},
+
+	error: function(response){
+	    console.log(response);
+	}
+    });
+
+}
+
+t()
+f()
+
+/*window.onload = function(){
+  f();
+  }*/
+
+#+END_SRC
+** Displaying Search by Tag(hardlinked searches)
+- Pulls the search tag from the URL
+- Searches for all the books in the tag table
+- Displays them 
+#+BEGIN_SRC javascript
+var f = function(){
+    temp = window.location.pathname.split("/");
+    temp_search = temp[temp.length-1];
+    search = temp_search.replace(/\-/, " ");
+//    alert(search);
+    
+    $.ajax({
+	url : '/tag/searchBy',
+	method: 'POST',
+	data : {search_term : search},
+	async : false,
+	success: function(response){
+	    arr=arr.concat(response['books'])
+	},
+	error: function(response){
+	    console.log(response);
+	}
+    });
+    /*    $("#first_book").html(arr[0].title)
+	  alert(arr)
+	  title="#t"
+	  for(var i=0; i<7; i++)
+	  {
+	  $(title.concat(i+1)).html(arr[i].title)
+	  }*/
+    var $div = $("#insertHere");
+    var temp = "";
+    for (var i=0; i<arr.length; i++)
+    {
+	if(i%6 ===0 & i!==0) temp = temp+"</div>";
+	if(i%6 === 0) temp = temp +"<div class='row stylish-panel'>";
+	temp = temp +"<div class='col-md-2'><div><img src='http://lorempixel.com/200/200/abstract/1/' alt='Book name' class='img-rectangle img-thumbnail'><h2>"+ arr[i].title+"</h2><p>"+arr[i].desc+"</p><a href='/book/"+arr[i].id+"' class='btn btn-primary' title='See more'>See more ª</a></div></div>";
+    }
+    $div.html(temp);
+}
+
+
+var t= function(){
+    $.ajax({
+	url: 'checkLogin',
+	method: 'GET',
+	success: function(response){
+	    if (response["success"] === false)
+	    {
+		$(".hideifnotlogged").html("")
+	    }
+	},
+
+	error: function(response){
+	    console.log(response);
+	}
+    });
+
+}
+
+t()
+f()
+
+/*window.onload = function(){
+  f();
+  }*/
+
+#+END_SRC
+** Recommendation 
+- Finds the recommendations for a given user through an ajax call to the recommendation route
+- Displays them
+#+BEGIN_SRC javascript
+var x = function(){
+    $.ajax({
+	url: '/book/recommendation',
+	method: 'POST',
+	success: function(response){
+	    arr = response['books']
+	    var $div = $("#insertHere");
+	    var temp = "";
+	    for (var i=0; i<arr.length; i++)
+	    {
+		if(i%6 ===0 & i!==0) temp = temp+"</div>";
+		if(i%6 === 0) temp = temp +"<div class='row stylish-panel'>";
+		temp = temp +"<div class='col-md-2'><div><img src='http://lorempixel.com/200/200/abstract/1/' alt='Book name' class='img-rectangle img-thumbnail'><h2>"+ arr[i].title+"</h2><p>"+arr[i].desc+"</p><a href='/book/"+arr[i].id+"' class='btn btn-primary' title='See more'>See more ª</a></div></div>";
+	    }
+	    $div.html(temp);
+
+	}
+	
+    });
+}
+
+var t= function(){
+    $.ajax({
+	url: 'checkLogin',
+	method: 'GET',
+	success: function(response){
+	    if (response["success"] === false)
+	    {
+		$(".hideifnotlogged").html("")
+	    }
+	},
+
+	error: function(response){
+	    console.log(response);
+	}
+    });
+
+}
+
+t();
+x();
+
+#+END_SRC
+** Validation
+- Allows a user to register with the site
+#+BEGIN_SRC javascript
+var validation = (function() {
+    $("#signUpButton").click(function() {
+        var username = $('#signUpUsername').val();
+	var email = $('#signUpEmail')
+        var passwword = $('#signUpPassword').val();
+        $.ajax({
+            url: '/user/addUser',
+            data: $('form').serialize(),
+            type: 'POST',
+            success: function(response) {
+                console.log(response);
+            },
+            error: function(error) {
+                console.log(error);
+            }
+        });
+    });
+});
+#+END_SRC
+** Displaying User Profile
+- Checks if User is logged in via ajax request
+- if logged in, the request returns the user's details which are then displayed on the page
+#+BEGIN_SRC javascript
+var t= function(){
+    $.ajax({
+	url: 'checkLogin',
+	method: 'GET',
+	success: function(response){
+	    if (response["success"] === true)
+	    {
+		user = response["user"];
+		$("#username").html(user.username)
+		$("#email").html(user.email)
+		$("#rating").html("Rating: To be filled")
+		$.ajax({
+		    url: '/review/user/avg_rating',
+		    method: 'GET',
+		    success: function(response){
+			$("#rating").html("Average Rating: "+response["avg_rating"])
+		    }
+		});
+	    }
+	},
+	error: function(response){
+	    console.log(response);
+	}
+    });
+
+}
+window.onload = function(){
+    t();
+}
+#+END_SRC

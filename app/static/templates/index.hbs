@@ -1,0 +1,36 @@
+<div class=" ui text container" style="margin-bottom:2%">
+	<h1 style="text-align:center" id="greet"></h1>
+</div>
+<div class=" ui text container" style="margin-bottom:2%">
+	<div style="display:table;margin:0 auto">
+		<div class="ui statistics">
+			<div class="statistic">
+				<div class="value" id="cube1">
+					<i class="cube icon"></i>
+				</div>
+				<div class="label">
+					Scratches
+				</div>
+			</div>
+			<div class="statistic">
+				<div class="value" id="cube2">
+					<i class="cubes icon"></i>
+				</div>
+				<div class="label">
+					Gists
+				</div>
+			</div>
+		</div>
+	</div>
+	<hr>
+</div>
+<div class=" ui text container" style="margin-bottom:2%">
+	<div style="margin-bottom:2%">
+		<form id="form" onsubmit="index.draw();return false;">
+			<label for="eq">Enter an equation:</label>
+			<input type="text" id="eq" value=" sin(x) +cos(x)" />
+			<input type="submit" class="ui primary blue button" value="Draw" />
+		</form>
+	</div>
+	<div id="plot" style="background:rgba(255,255,255,0.9);"></div>
+</div>

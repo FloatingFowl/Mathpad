@@ -1,0 +1,18 @@
+<form id="form" class="ui form" onsubmit="return false">
+	<div class=" ui text container" style="margin-bottom:2%">
+		<select class="ui floating fluid search dropdown" id="select">
+			<option val="">Choose scratch</option>
+	</select>
+	</div>
+	<div class="ui text container" style="margin-bottom:2%">
+		<button class="ui primary blue button" id="but" onclick="deletesafe.del_ete($('#select').val())">Delete</button>
+		<button class="ui button" onclick="deletesafe.prev()" id="but3">Preview</button>
+		<hr>
+	</div>
+	<div class="ui text container">
+		<div class="ui raised segment">
+			<div class="ui header" id="head"></div>
+			<div id="content"></div>
+		</div>
+	</div>
+</form>
